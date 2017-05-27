@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
+extern char **environ;
+
 // Simplifed xv6 shell.
 
 #define MAXARGS 10
@@ -48,6 +50,11 @@ runcmd(struct cmd *cmd)
   struct execcmd *ecmd;
   struct pipecmd *pcmd;
   struct redircmd *rcmd;
+  char *path = NULL;
+  char *path_val = NULL;
+  char *s = NULL;
+  char *ss = NULL;
+  char path_cmd[100];
 
   if(cmd == 0)
     exit(0);
@@ -57,26 +64,87 @@ runcmd(struct cmd *cmd)
     fprintf(stderr, "unknown runcmd\n");
     exit(-1);
 
-  case ' ':
+  case 'e':
     ecmd = (struct execcmd*)cmd;
     if(ecmd->argv[0] == 0)
       exit(0);
-    fprintf(stderr, "exec not implemented\n");
     // Your code here ...
+#if 0
+    printf("ecmd->argv: %x\n", ecmd->argv);
+    printf("*ecmd->argv: %s\n", *ecmd->argv);
+    printf("ecmd->argv[0]: %s\n", ecmd->argv[0]);
+#endif    
+    if(!strchr(ecmd->argv[0], '/'))
+    {   //have not specify where to find the executble file. so find it.
+        path = getenv("PATH");
+        //printf("PATH = %s\n", path);
+        if(path)
+        {
+            path_val = malloc(strlen(path)+1);
+            memset(path_val, 0, sizeof(path_val));
+            memcpy(path_val, path, strlen(path));
+            s = path_val;
+            ss = path_val;
+            while(*ss)
+            {
+                if(strchr(":", *ss))
+                {
+                    *ss = 0;
+                    snprintf(path_cmd, sizeof(path_cmd), "%s/%s", s, ecmd->argv[0]);
+                    execv(path_cmd, ecmd->argv);
+                    s = ss+1;
+                }
+                ss++;
+            }
+            if(*s)
+            {
+                snprintf(path_cmd, sizeof(path_cmd), "%s/%s", s, ecmd->argv[0]);
+                execv(path_cmd, ecmd->argv);
+            }
+            free(path_val);
+            path_val = NULL;
+        }
+    }
+    if(execv(ecmd->argv[0], ecmd->argv) < 0)
+    {
+        fprintf(stderr, "failed to execv: %s \n", ecmd->argv[0]);
+        exit(-1);
+    }
     break;
 
   case '>':
   case '<':
     rcmd = (struct redircmd*)cmd;
-    fprintf(stderr, "redir not implemented\n");
     // Your code here ...
+    close(rcmd->fd);
+    open(rcmd->file, rcmd->mode);
     runcmd(rcmd->cmd);
     break;
 
   case '|':
     pcmd = (struct pipecmd*)cmd;
-    fprintf(stderr, "pipe not implemented\n");
     // Your code here ...
+    pipe(p);
+    if(fork1() == 0)
+    {
+            close(1);
+	    dup(p[1]);
+	    close(p[1]);
+	    close(p[0]);
+	    fprintf(stderr, "left\n");
+	    runcmd(pcmd->left);
+	    fprintf(stderr, "left end\n"); // never print, exec overwrite program context.
+    }
+    else
+    {
+            close(0);
+	    dup(p[0]);
+	    close(p[0]);
+	    close(p[1]);
+	    fprintf(stderr, "right\n");
+	    runcmd(pcmd->right);
+	    fprintf(stderr, "right end\n"); // never print, exec overwrite program context.
+    }
     break;
   }    
   exit(0);
@@ -87,11 +155,15 @@ getcmd(char *buf, int nbuf)
 {
   
   if (isatty(fileno(stdin)))
-    fprintf(stdout, "6.828$ ");
+    fprintf(stdout, "xv6_shell$ ");
   memset(buf, 0, nbuf);
   fgets(buf, nbuf, stdin);
-  if(buf[0] == 0) // EOF
-    return -1;
+  //printf("%x\n", buf[0]);
+  if(buf[0] == 0){ // EOF
+     printf("buf[0] == 0\n");
+     return -1;
+  }
+  //printf("%s", buf);
   return 0;
 }
 
@@ -136,7 +208,7 @@ execcmd(void)
 
   cmd = malloc(sizeof(*cmd));
   memset(cmd, 0, sizeof(*cmd));
-  cmd->type = ' ';
+  cmd->type = 'e';
   return (struct cmd*)cmd;
 }
 
@@ -307,7 +379,9 @@ parseexec(char **ps, char *es)
   int tok, argc;
   struct execcmd *cmd;
   struct cmd *ret;
-  
+
+  //printf("parseexec sizeof(*cmd): %d sizeof(struct execcmd) %d sizeof(cmd) %d\n", sizeof(*cmd), sizeof(struct execcmd), sizeof(cmd));
+  //parseexec sizeof(*cmd): 88 sizeof(struct execcmd) 88 sizeof(cmd) 8
   ret = execcmd();
   cmd = (struct execcmd*)ret;
 
